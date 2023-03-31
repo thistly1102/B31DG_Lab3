@@ -6,11 +6,14 @@
 #define T3_INPUT 1
 #define T4_INPUT 2
 #define T4_LED 19
-#define T6_BUTTON 6
+#define T6_BUTTON 3
 #define T7_LED 7
 
 unsigned int T2_Freq = 0;            //Frequency Reading for Task 2
 unsigned int T3_Freq = 0;            //Frequency Reading for Task 3
+unsigned int buttonToggle = 0;
+unsigned int lastButtonRead = 0;
+unsigned int LEDSet = 0;
 
 //Reading Values for Task 4
 double reading1 = 0;
@@ -21,27 +24,23 @@ double read_average = 0;
 
 unsigned int T4_counter = 1;
 
-// define tasks
-void task1( void *pvParameters );
-void task2( void *pvParameters );
-void task3( void *pvParameters );
-void task4( void *pvParameters );
-void task5( void *pvParameters );
-//void task6( void *pvParameters );
-//void task7( void *pvParameters );
+//Run and Violation Counter for each task
+int T1Runs, T2Runs, T3Runs, T4Runs, T5Runs, T6Runs, T7Runs;
+int T1Violations, T2Violations, T3Violations, T4Violations, T5Violations, T6Violations, T7Violations;
 
 // Declare a mutex Semaphore Handle which we will use to manage the Serial Port.
-// It will be used to ensure only onetTask is accessing this resource at any time.
+// It will be used to ensure only one Task is accessing this resource at any time.
 SemaphoreHandle_t Semaphore;
 
-// Declare the event queue handle for tasks 6 and 7
-QueueHandle_t queueLED;
+// Declare the event queue handle used in tasks 6 and 7
+QueueHandle_t queueT7;
 
-// Define the struct for tasks 2 and 3
+// Define the Global Structure for Tasks 2 and 3 Values
 typedef struct {
     int T2_Struct;
     int T3_Struct;
-} frequencyGlobalStructure;
+} 
+frequencyGlobalStructure;
 
 // Define a global variable of type frequencyGlobalStructure
 frequencyGlobalStructure freqStruct;
@@ -51,22 +50,32 @@ void setup() {
 
   Serial.begin(9600);  // Starts the serial communication and sets baud rate to 9600
 
+  //Define Pins for each task
   pinMode(T1_OUTPUT, OUTPUT);
   pinMode(T2_INPUT, INPUT);
   pinMode(T3_INPUT, INPUT);
   pinMode(T4_INPUT, INPUT);
   pinMode(T4_LED, OUTPUT);
+  pinMode(T6_BUTTON, INPUT);
+  pinMode(T7_LED, OUTPUT);
 
+  if (Semaphore == NULL)
+  {
+    Semaphore = xSemaphoreCreateMutex();  // Create a mutex semaphore we will use to manage the Serial Port
+  }
+  if (Semaphore != NULL)
+  {
+    xSemaphoreGive(Semaphore);
+  }
   // Now set up tasks to run independently.
-  xTaskCreatePinnedToCore(task1, "SignalOut", 2000, NULL, 1, NULL, ARDUINO_RUNNING_CORE);
-  xTaskCreatePinnedToCore(task2, "T2FreqRead", 2000, NULL, 2, NULL, ARDUINO_RUNNING_CORE);
-  xTaskCreatePinnedToCore(task3, "T3FreqRead", 2000, NULL, 3, NULL, ARDUINO_RUNNING_CORE);
-  xTaskCreatePinnedToCore(task4, "T4AnalogueRead", 2000, NULL, 4, NULL, ARDUINO_RUNNING_CORE);
-  xTaskCreatePinnedToCore(task5, "FrequencyOutput", 2000, NULL, 5, NULL, ARDUINO_RUNNING_CORE);
-  //xTaskCreatePinnedToCore(task6, "ButtonMonitor", 10000, NULL, 6, NULL, ARDUINO_RUNNING_CORE);
-  //xTaskCreatePinnedToCore(task7, "LEDControl", 10000, NULL, 7, NULL, ARDUINO_RUNNING_CORE);
+  xTaskCreate(task1, "SignalOut", 3000, NULL, 1, NULL);
+  xTaskCreate(task2, "T2FreqRead", 3000, NULL, 2, NULL);
+  xTaskCreate(task3, "T3FreqRead", 3000, NULL, 3, NULL);
+  xTaskCreate(task4, "T4AnalogueRead", 3000, NULL, 4, NULL);
+  xTaskCreate(task5, "FrequencyOutput", 3000, NULL, 5, NULL);
+  xTaskCreate(task6, "ButtonMonitor", 3000, NULL, 6, NULL);
+  xTaskCreate(task7, "LEDControl", 3000, NULL, 7, NULL);
 
-  Semaphore = xSemaphoreCreateMutex();  // Create a mutex semaphore we will use to manage the Serial Port
 
   // Now the task scheduler, which takes over control of scheduling individual tasks, is automatically started.
 }
@@ -83,96 +92,92 @@ void loop()
 ///// TASK 1 /////
 void task1(void *pvParameters)
 {
-  (void) pvParameters;
 
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(4); // Task period (in milliseconds)
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(4); // Task period (in milliseconds)
   
-  // Initialize xLastWakeTime to the current tick count
-  xLastWakeTime = xTaskGetTickCount();
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
 
   for (;;)
   {
-    //See if we can obtain the semaphore. If the semaphore is not available wait 10 ticks to see if it becomes free.
+    //See if we can obtain the semaphore. If the semaphore is not available wait 250 ticks to see if it becomes free.
     if (xSemaphoreTake(Semaphore, ( TickType_t ) 250 ) == pdTRUE)
     {
       digitalWrite(T1_OUTPUT, HIGH);   // turn the LED on (HIGH is the voltage level)
-      vTaskDelay( 200 / portTICK_PERIOD_MS ); // wait for one second
+      delayMicroseconds(200);      //Delay 200us
       digitalWrite(T1_OUTPUT, LOW);    // turn the LED off by making the voltage LOW
-      vTaskDelay( 50 / portTICK_PERIOD_MS ); // wait for one second
+      delayMicroseconds(50);      //Delay 50us
       digitalWrite(T1_OUTPUT, HIGH);   // turn the LED on (HIGH is the voltage level)
-      vTaskDelay( 30 / portTICK_PERIOD_MS ); // wait for one second
+      delayMicroseconds(30);      //Delay 30us
       digitalWrite(T1_OUTPUT, LOW);   // turn the LED off (LOW is the voltage level)
 
       xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
     }
     // Wait until the end of the task period
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    vTaskDelayUntil( &LastWakeTime, Frequency );
   }
 }
 
 ///// TASK 2 /////
 void task2(void *pvParameters)
 {
-  (void) pvParameters;
   
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(20); // Task period (in milliseconds)
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(20); // Task period (in milliseconds)
   
-  // Initialize xLastWakeTime to the current tick count
-  xLastWakeTime = xTaskGetTickCount();
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
 
   for (;;)
   {
     //See if we can obtain the semaphore. If the semaphore is not available wait 10 ticks to see if it becomes free.
     if (xSemaphoreTake( Semaphore, ( TickType_t ) 250 ) == pdTRUE)
     {
-      int Freq_Input_High = pulseIn(T2_INPUT, HIGH, 4000);  //us
+      int Freq_Input_High = pulseIn(T2_INPUT, HIGH, 3000);  //us
       freqStruct.T2_Struct = 1000000 / (2 * Freq_Input_High);  //Hz
 
       xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
     }
     // Wait until the end of the task period
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    vTaskDelayUntil( &LastWakeTime, Frequency );
   }
 }
 
 ///// TASK 3 /////
 void task3(void *pvParameters)
 {
-  (void) pvParameters;
   
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(8); // Task period (in milliseconds)
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(8); // Task period (in milliseconds)
   
-  // Initialize xLastWakeTime to the current tick count
-  xLastWakeTime = xTaskGetTickCount();
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
 
   for (;;)
   {
     //See if we can obtain the semaphore. If the semaphore is not available wait 10 ticks to see if it becomes free.
     if (xSemaphoreTake( Semaphore, ( TickType_t ) 250 ) == pdTRUE)
     {
-      int Freq_Input_High = pulseIn(T3_INPUT, HIGH, 4000);  //us
+      int Freq_Input_High = pulseIn(T3_INPUT, HIGH, 3000);  //us
       freqStruct.T3_Struct = 1000000 / (2 * Freq_Input_High);  //Hz
 
       xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
     }
     // Wait until the end of the task period
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    vTaskDelayUntil( &LastWakeTime, Frequency );
   }
 }
 
 ///// TASK 4 /////
 void task4(void *pvParameters)
 {
-  (void) pvParameters;
 
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(20); // Task period (in milliseconds)
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(20); // Task period (in milliseconds)
   
-  // Initialize xLastWakeTime to the current tick count
-  xLastWakeTime = xTaskGetTickCount();
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
 
   for (;;)
   {
@@ -210,19 +215,18 @@ void task4(void *pvParameters)
       xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
     }
     // Wait until the end of the task period
-    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    vTaskDelayUntil( &LastWakeTime, Frequency );
   }
 }
 
 ///// TASK 5 /////
 void task5(void *pvParameters)
 {
-  (void) pvParameters;
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(100); // Task period (in milliseconds)
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(100); // Task period (in milliseconds)
   
-  // Initialize xLastWakeTime to the current tick count
-  xLastWakeTime = xTaskGetTickCount();
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
 
   for (;;)
   {
@@ -250,7 +254,84 @@ void task5(void *pvParameters)
 
       xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
     }
-    // Initialize xLastWakeTime to the current tick count
-    xLastWakeTime = xTaskGetTickCount();
+    vTaskDelayUntil( &LastWakeTime, Frequency );
+  }
+}
+
+///// TASK 6 /////
+void task6(void *pvParameters)
+{
+  
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(100); // Task period (in milliseconds)
+  
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
+
+  for (;;)
+  {
+    //See if we can obtain the semaphore. If the semaphore is not available wait 10 ticks to see if it becomes free.
+    if (xSemaphoreTake( Semaphore, ( TickType_t ) 250 ) == pdTRUE)
+    {
+      queueT7 = xQueueCreate(10, sizeof(int)); //Create Event Queue for LED
+      buttonToggle = digitalRead(T6_BUTTON) == HIGH;  //Get Button State
+      //Ensure multiple toggles are not sent on same button push
+      if (lastButtonRead == 1 && buttonToggle == 1)  //If lastButtonRead and buttonToggle are both HIGH then does not run
+      {
+        buttonToggle = 0;
+        xQueueSend(queueT7, &buttonToggle, 0);  //Send event to Queue
+      }
+      else if (lastButtonRead == 0 && buttonToggle == 1)
+      {
+        xQueueSend(queueT7, &buttonToggle, 0);  //Send event to Queue  
+        lastButtonRead = 1;
+      }
+      else
+      {
+        buttonToggle = 0;
+        xQueueSend(queueT7, &buttonToggle, 0);  //Send event to Queue        
+      }
+
+      xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
+    }
+    // Wait until the end of the task period
+    vTaskDelayUntil( &LastWakeTime, Frequency );
+  }
+}
+
+///// TASK 7 /////
+void task7(void *pvParameters)
+{
+  
+  TickType_t LastWakeTime;
+  const TickType_t Frequency = pdMS_TO_TICKS(100); // Task period (in milliseconds)
+  
+  // Initialize LastWakeTime to the current tick count
+  LastWakeTime = xTaskGetTickCount();
+
+  for (;;)
+  {
+    //See if we can obtain the semaphore. If the semaphore is not available wait 10 ticks to see if it becomes free.
+    if (xSemaphoreTake( Semaphore, ( TickType_t ) 250 ) == pdTRUE)
+    {
+      unsigned int LEDToggle;
+      xQueueReceive(queueT7, &LEDToggle, 1);  // Wait for an event to be received from the queue
+      if (LEDToggle == 1)
+      {
+        if (LEDSet == 0)
+        {
+          digitalWrite(T7_LED, HIGH);
+          LEDSet = 1;
+        }
+        else if (LEDSet == 1)
+        {
+          digitalWrite(T7_LED, LOW);
+          LEDSet = 0;          
+        }     
+      }
+      xSemaphoreGive( Semaphore ); // Now give the Serial Port for others.
+    }
+    // Wait until the end of the task period
+    vTaskDelayUntil( &LastWakeTime, Frequency );
   }
 }
